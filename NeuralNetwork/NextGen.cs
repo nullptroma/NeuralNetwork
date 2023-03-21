@@ -8,10 +8,11 @@ namespace NeuralNetwork
         private Func<double, double> ActivationFunc { get; set; }
         private Func<double, double> DerivativeFunction { get; set; }
         public Layer[] Layers { get; set; }
-        [XmlIgnore]
-        public double LearningRatio { get; set; }
+        [XmlIgnore] public double LearningRatio { get; set; }
+        [XmlIgnore] double[] _curDeltas;
+        [XmlIgnore] double[] _lastDeltas;
 
-        public double[] ForwardPassData(double[] input)
+        public void ForwardPassData(double[] input, ref double[] output)
         {
             Array.Copy(input, Layers[0].ActivatedNeurons, input.Length);
             for(int layerIndex = 0; layerIndex<Layers.Length-1; layerIndex++)
@@ -26,39 +27,50 @@ namespace NeuralNetwork
                 }
                 nextL.Activate(ActivationFunc);
             }
-            return Layers[Layers.Length - 1].ActivatedNeurons.ToArray();
+            Array.Copy(Layers[Layers.Length - 1].ActivatedNeurons, output, output.Length);
         }
 
-        public double AdjustWeights(double[] input, double[] targets, out double[] output)
+        public double AdjustWeights(double[] input, double[] targets, ref double[] output)
         {
-            output = ForwardPassData(input);
-            double[] lastDeltas = new double[Layers[Layers.Length - 1].NumOfInputNeurons];
-            for (int i = 0; i < lastDeltas.Length; i++)
-                lastDeltas[i] = (targets[i] - Layers[Layers.Length - 1].ActivatedNeurons[i])*DerivativeFunction(Layers[Layers.Length - 1].Neurons[i]);
+            ForwardPassData(input, ref output);
+
+            int curDeltasCount = 0;
+            for (int i = 0; i < Layers[Layers.Length - 1].NumOfInputNeurons; i++)
+                _lastDeltas[i] = (targets[i] - Layers[Layers.Length - 1].ActivatedNeurons[i])*DerivativeFunction(Layers[Layers.Length - 1].Neurons[i]);
             for (int layer = Layers.Length - 2; layer >= 0; layer--)
             {
                 for (int n = 0; n < Layers[layer].Neurons.Length; n++)
                 {
                     double gradient = LearningRatio * Layers[layer].ActivatedNeurons[n];
                     for (int nextN = 0; nextN < Layers[layer + 1].NumOfInputNeurons; nextN++)
-                        Layers[layer].Weights[n][nextN] += gradient * lastDeltas[nextN];
+                        Layers[layer].Weights[n][nextN] += gradient * _lastDeltas[nextN];
                 }
 
-                double[] curDeltas = new double[Layers[layer].Neurons.Length];
-                for (int n = 0; n < curDeltas.Length; n++)
+                curDeltasCount = Layers[layer].Neurons.Length;
+                for (int n = 0; n < curDeltasCount; n++)
                 {
                     for (int nextN = 0; nextN < Layers[layer + 1].NumOfInputNeurons; nextN++)
-                        curDeltas[n] += lastDeltas[nextN] * Layers[layer].Weights[n][nextN];
-                    curDeltas[n] *= DerivativeFunction(Layers[layer].Neurons[n]);
+                        _curDeltas[n] += _lastDeltas[nextN] * Layers[layer].Weights[n][nextN];
+                    _curDeltas[n] *= DerivativeFunction(Layers[layer].Neurons[n]);
                 }
 
-                lastDeltas = curDeltas;
+                (_lastDeltas, _curDeltas) = (_curDeltas, _lastDeltas);
             }
-
+            
             double sum = 0;
             for (int i = 0; i < targets.Length; i++)
                 sum += (targets[i] - Layers[Layers.Length - 1].ActivatedNeurons[i]) * (targets[i] - Layers[Layers.Length - 1].ActivatedNeurons[i]);
             return sum / targets.Length;
+        }
+
+        public void InitLearn()
+        {
+            int maxNeurons = 0;
+            foreach (var layer in Layers)
+                maxNeurons = Math.Max(layer.Neurons.Length, maxNeurons);
+
+            _curDeltas = new double[maxNeurons];
+            _lastDeltas = new double[maxNeurons];
         }
 
         public NextGen(Func<double, double> activationFunc, Func<double, double> derivativeFunction, params NeuronLayer[] layers)
@@ -91,10 +103,10 @@ namespace NeuralNetwork
             xmlSerializer.Serialize(File.Create(path), net);
         }
 
-        public static NextGen LoadFromFile(string path)
+        public static NextGen? LoadFromFile(string path)
         {
             XmlSerializer xmlSerializer = new XmlSerializer(typeof(NextGen));
-            return (NextGen)xmlSerializer.Deserialize(File.OpenRead(path));
+            return (NextGen)xmlSerializer.Deserialize(File.OpenRead(path))!;
         }
 
         public override string ToString()
@@ -116,6 +128,7 @@ namespace NeuralNetwork
         public int NumOfInputNeurons { get { return Neurons.Length - (Bias ? 1 : 0); } }
         public double[] Neurons { get; set; }
         public double[] ActivatedNeurons { get; set; }
+        public double[] Deltas { get; set; }
         public double[][] Weights { get; set; }
         public bool Bias { get; set; }
 
